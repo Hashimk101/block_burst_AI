@@ -144,35 +144,72 @@ def draw_panel(screen, score, fonts, tick):
                      ai_rect.centery - al.get_height() // 2))
 
 
-def draw_picker_panel(screen, fonts):
+
+# One vivid color per picker slot
+PICKER_COLORS = [
+    (60,  200, 255),   # slot 0 — cyan-blue
+    (255, 100, 180),   # slot 1 — pink
+    (100, 255, 160),   # slot 2 — green
+]
+
+def draw_shape_preview(screen, offsets, color, cx, cy, preview_cell):
+    """Draw a shape centered at (cx, cy) using preview_cell-sized mini-cells."""
+    if not offsets:
+        return
+    rows = [r for r, c in offsets]
+    cols = [c for r, c in offsets]
+    min_r, max_r = min(rows), max(rows)
+    min_c, max_c = min(cols), max(cols)
+    shape_w = (max_c - min_c + 1) * preview_cell
+    shape_h = (max_r - min_r + 1) * preview_cell
+    ox = cx - shape_w // 2
+    oy = cy - shape_h // 2
+    for r, c in offsets:
+        px = ox + (c - min_c) * preview_cell
+        py = oy + (r - min_r) * preview_cell
+        inner = pygame.Rect(px + 1, py + 1, preview_cell - 2, preview_cell - 2)
+        pygame.draw.rect(screen, color, inner)
+        # top highlight
+        hl = pygame.Surface((inner.width, 3), pygame.SRCALPHA)
+        hl.fill((255, 255, 255, 50))
+        screen.blit(hl, inner.topleft)
+        # border
+        pygame.draw.rect(screen, tuple(min(v + 60, 255) for v in color),
+                         pygame.Rect(px, py, preview_cell, preview_cell), 1)
+
+
+def draw_picker_panel(screen, fonts, picked_boxes):
     gx = SIDE_PANEL_WIDTH + boxes.col_size * cell_size
     gy = TOP_BAR_HEIGHT
     gh = boxes.row_size * cell_size
     pw = PICKER_PANEL_WIDTH
-    pad = 12
+    pad = 10
 
     pygame.draw.rect(screen, BG_PANEL, pygame.Rect(gx, gy, pw, gh))
     pygame.draw.line(screen, GRID_LINE, (gx, gy), (gx, gy + gh), 1)
 
     lbl = fonts['small'].render("NEXT", True, DARK_TEXT)
-    screen.blit(lbl, (gx + pw // 2 - lbl.get_width() // 2, gy + 10))
+    screen.blit(lbl, (gx + pw // 2 - lbl.get_width() // 2, gy + 8))
 
     box_w = pw - pad * 2
     box_h = box_w
-    spacing = (gh - 30 - 3 * box_h) // 4
+    spacing = (gh - 26 - 3 * box_h) // 4
+    preview_cell = 12   # mini cell size for shape preview
 
-    for i in range(3):
+    for i, box in enumerate(picked_boxes):
         bx = gx + pad
-        by = gy + 30 + spacing + i * (box_h + spacing)
-        box_rect = pygame.Rect(bx, by, box_w, box_h)
-        pygame.draw.rect(screen, CELL_EMPTY, box_rect)
-        pygame.draw.rect(screen, DARK_TEXT, box_rect, 1)
+        by = gy + 26 + spacing + i * (box_h + spacing)
+        slot_rect = pygame.Rect(bx, by, box_w, box_h)
 
-        cx, cy = box_rect.centerx, box_rect.centery
-        arm = 8
-        mid_color = (50, 52, 72)
-        pygame.draw.line(screen, mid_color, (cx - arm, cy), (cx + arm, cy), 1)
-        pygame.draw.line(screen, mid_color, (cx, cy - arm), (cx, cy + arm), 1)
+        # Slot background + border
+        pygame.draw.rect(screen, CELL_EMPTY, slot_rect)
+        pygame.draw.rect(screen, DARK_TEXT, slot_rect, 1)
+
+        # Draw shape preview centered in slot
+        color = PICKER_COLORS[i % len(PICKER_COLORS)]
+        cx = slot_rect.centerx
+        cy = slot_rect.centery
+        draw_shape_preview(screen, box.offsets, color, cx, cy, preview_cell)
 
 
 def run(score=0, title="Block Blast"):
@@ -194,6 +231,7 @@ def run(score=0, title="Block Blast"):
 
     clock = pygame.time.Clock()
     tick  = 0
+    picked_boxes = boxes.get_3_random_boxes()
 
     running = True
     while running:
@@ -205,7 +243,7 @@ def run(score=0, title="Block Blast"):
         draw_top_bar(screen, fonts, tick)
         draw_grid(screen, tick)
         draw_panel(screen, score, fonts, tick)
-        draw_picker_panel(screen, fonts)
+        draw_picker_panel(screen, fonts, picked_boxes)
 
         pygame.display.flip()
         clock.tick(60)
