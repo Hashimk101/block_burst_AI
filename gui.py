@@ -162,18 +162,18 @@ def draw_grid(screen, tick, dragging=None, drag_color=None,
     valid_ghost = False
     if dragging is not None:
         mx, my = pygame.mouse.get_pos()
-        # anchor the shape so its center tracks the mouse
         offsets = dragging.offsets
         rows = [r for r, c in offsets]
         cols = [c for r, c in offsets]
-        shape_rows = max(rows) - min(rows) + 1
-        shape_cols = max(cols) - min(cols) + 1
-        # cell under mouse
+        min_r, min_c = min(rows), min(cols)
+        span_r = max(rows) - min_r
+        span_c = max(cols) - min_c
         cell = pixel_to_cell(mx, my)
         if cell:
             cr, cc = cell
-            anchor_r = cr - shape_rows // 2
-            anchor_c = cc - shape_cols // 2
+            # anchor so the shape's center cell tracks the mouse
+            anchor_r = cr - (min_r + span_r // 2)
+            anchor_c = cc - (min_c + span_c // 2)
             candidate = [(anchor_r + dr, anchor_c + dc) for dr, dc in offsets]
             all_inside = all(0 <= r < boxes.row_size and 0 <= c < boxes.col_size
                              for r, c in candidate)
@@ -233,7 +233,7 @@ def draw_grid(screen, tick, dragging=None, drag_color=None,
     return ghost_cells, valid_ghost
 
 
-def draw_panel(screen, score, best, fonts, tick):
+def draw_panel(screen, score, best, fonts, tick, ai_enabled=False):
     pw  = SIDE_PANEL_WIDTH
     pad = 14
 
@@ -255,19 +255,30 @@ def draw_panel(screen, score, best, fonts, tick):
     bv = fonts['medium'].render(f"{best:,}", True, SCORE_SILVER)
     screen.blit(bv, (bst_rect.centerx - bv.get_width() // 2, bst_rect.y + 32))
 
+    # HOME button — active, clickable
     home_rect = pygame.Rect(pad, TOP_BAR_HEIGHT + 228, pw - pad * 2, 50)
+    mx, my = pygame.mouse.get_pos()
+    home_hov = home_rect.collidepoint(mx, my)
+    home_border = NEON_CYAN if home_hov else DARK_TEXT
     pygame.draw.rect(screen, BG_PANEL, home_rect)
-    pygame.draw.rect(screen, DARK_TEXT, home_rect, 1)
-    hl = fonts['small'].render("HOME", True, DARK_TEXT)
+    pygame.draw.rect(screen, home_border, home_rect, 2 if home_hov else 1)
+    hl = fonts['small'].render("HOME", True, NEON_CYAN if home_hov else DARK_TEXT)
     screen.blit(hl, (home_rect.centerx - hl.get_width() // 2,
                      home_rect.centery - hl.get_height() // 2))
 
+    # AI toggle — glows green when on
     ai_rect = pygame.Rect(pad, TOP_BAR_HEIGHT + 294, pw - pad * 2, 50)
+    ai_hov    = ai_rect.collidepoint(mx, my)
+    ai_color  = NEON_GREEN if ai_enabled else DARK_TEXT
+    ai_border = NEON_GREEN if ai_enabled else (NEON_BLUE if ai_hov else DARK_TEXT)
     pygame.draw.rect(screen, BG_PANEL, ai_rect)
-    pygame.draw.rect(screen, DARK_TEXT, ai_rect, 1)
-    al = fonts['small'].render("AI: OFF", True, DARK_TEXT)
+    pygame.draw.rect(screen, ai_border, ai_rect, 2 if (ai_enabled or ai_hov) else 1)
+    ai_label = f"AI: {'ON ' if ai_enabled else 'OFF'}"
+    al = fonts['small'].render(ai_label, True, ai_color)
     screen.blit(al, (ai_rect.centerx - al.get_width() // 2,
                      ai_rect.centery - al.get_height() // 2))
+
+    return home_rect, ai_rect
 
 
 def draw_picker_panel(screen, fonts, picked_boxes, dragging_idx):
@@ -301,11 +312,31 @@ def draw_dragged_piece(screen, box, color, mouse_pos):
     offsets = box.offsets
     rows = [r for r, c in offsets]
     cols = [c for r, c in offsets]
-    shape_rows = max(rows) - min(rows) + 1
-    shape_cols = max(cols) - min(cols) + 1
-    anchor_px = mx - (shape_cols * cell_size) // 2
-    anchor_py = my - (shape_rows * cell_size) // 2
+    min_r, min_c = min(rows), min(cols)
+    span_r = max(rows) - min_r
+    span_c = max(cols) - min_c
+    anchor_px = mx - (min_c + span_c // 2) * cell_size - cell_size // 2
+    anchor_py = my - (min_r + span_r // 2) * cell_size - cell_size // 2
     draw_full_shape(screen, offsets, color, anchor_px, anchor_py, alpha=200)
+
+
+def draw_game_over(screen, fonts, score):
+    """Dark overlay with GAME OVER text and final score."""
+    overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))
+    screen.blit(overlay, (0, 0))
+
+    cx = screen.get_width()  // 2
+    cy = screen.get_height() // 2
+
+    go_surf = fonts['gameover'].render("GAME OVER", True, NEON_PINK)
+    screen.blit(go_surf, (cx - go_surf.get_width() // 2, cy - 60))
+
+    sc_surf = fonts['title'].render(f"SCORE: {score:,}", True, SCORE_GOLD)
+    screen.blit(sc_surf, (cx - sc_surf.get_width() // 2, cy + 10))
+
+    hint = fonts['small'].render("press ESC to quit", True, DARK_TEXT)
+    screen.blit(hint, (cx - hint.get_width() // 2, cy + 60))
 
 
 # ── Placement logic ──────────────────────────────────────────────────────────
@@ -315,59 +346,59 @@ def try_place(box, mouse_pos, color_idx):
     offsets = box.offsets
     rows = [r for r, c in offsets]
     cols = [c for r, c in offsets]
-    shape_rows = max(rows) - min(rows) + 1
-    shape_cols = max(cols) - min(cols) + 1
+    min_r, min_c = min(rows), min(cols)
+    span_r = max(rows) - min_r
+    span_c = max(cols) - min_c
     cell = pixel_to_cell(mx, my)
     if cell is None:
         return False
     cr, cc = cell
-    anchor_r = cr - shape_rows // 2
-    anchor_c = cc - shape_cols // 2
-    # color_idx+1 stored as the cell value so we can look up color later
+    anchor_r = cr - (min_r + span_r // 2)
+    anchor_c = cc - (min_c + span_c // 2)
     return boxes.place_block(box.block_type, anchor_r, anchor_c, value=color_idx + 1)
 
 
-# ── Main loop ────────────────────────────────────────────────────────────────
-def run(title="Block Blast"):
-    pygame.init()
+# ── Main game loop ────────────────────────────────────────────────────────────
+def run(screen, fonts, clock):
+    """
+    Run one game session.
+    Returns when the player goes to menu (HOME button, game over, or ESC).
+    Score is saved before returning.
+    """
+    import menu as _menu
 
-    screen_width  = SIDE_PANEL_WIDTH + boxes.col_size * cell_size + PICKER_PANEL_WIDTH + RIGHT_MARGIN
-    screen_height = TOP_BAR_HEIGHT + boxes.row_size * cell_size + RIGHT_MARGIN
-    screen = pygame.display.set_mode((screen_width, screen_height))
-    pygame.display.set_caption(title)
+    boxes.reset_grid()
 
-    fonts = {
-        'title':  pygame.font.SysFont("impact", 30),
-        'score':  pygame.font.SysFont("impact", 36),
-        'medium': pygame.font.SysFont("impact", 26),
-        'label':  pygame.font.SysFont("couriernew", 13, bold=True),
-        'small':  pygame.font.SysFont("couriernew", 12, bold=True),
-    }
-
-    clock        = pygame.time.Clock()
-    tick         = 0
     score        = 0
-    best         = 0
+    best         = max(_menu.load_highscores()[:1] or [0])
     picked_boxes = boxes.get_3_random_boxes()
 
-    # Drag state
     dragging_idx   = None
     dragging_box   = None
     dragging_color = None
 
-    # Clear flash state
     flash_rows = []
     flash_cols = []
-    flash_t    = 0          # counts down from FLASH_DURATION to 0
+    flash_t    = 0
 
-    running = True
-    game_over = False
-    while running:
+    game_over        = False
+    go_timer         = 0       # frames to show game-over overlay before returning
+    GO_LINGER        = 120     # 2 seconds at 60fps
+
+    tick = 0
+
+    while True:
         mouse_pos = pygame.mouse.get_pos()
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
+                _menu.save_score(score)
+                pygame.quit()
+                raise SystemExit
+
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                _menu.save_score(score)
+                return
 
             if game_over:
                 continue
@@ -388,29 +419,44 @@ def run(title="Block Blast"):
                         if all(b is None for b in picked_boxes):
                             picked_boxes = boxes.get_3_random_boxes()
 
-                        # ── Run line-clear logic ──────────────────────────────
                         pts, cleared_rows, cleared_cols = scores.process_move(boxes.grid_obj)
                         if pts > 0:
                             score += pts
                             best   = max(best, score)
-                            # Kick off flash animation
                             flash_rows = cleared_rows
                             flash_cols = cleared_cols
                             flash_t    = FLASH_DURATION
 
-                        # ── Game over check ────────────────────────────────
                         if scores.check_game_over(boxes.grid_obj, picked_boxes):
                             game_over = True
+
+                # Check HOME / AI clicks (panel returns their rects)
+                elif not dragging_box:
+                    # We draw panel each frame; re-compute rects here for hit testing
+                    pad = 14
+                    pw  = SIDE_PANEL_WIDTH
+                    home_r = pygame.Rect(pad, TOP_BAR_HEIGHT + 228, pw - pad * 2, 50)
+                    ai_r   = pygame.Rect(pad, TOP_BAR_HEIGHT + 294, pw - pad * 2, 50)
+                    if home_r.collidepoint(mouse_pos):
+                        _menu.save_score(score)
+                        return
+                    if ai_r.collidepoint(mouse_pos):
+                        _menu.ai_enabled = not _menu.ai_enabled
 
                 dragging_idx   = None
                 dragging_box   = None
                 dragging_color = None
 
-        # Game over check after picker refill
+        # Game-over linger then return to menu
+        if game_over:
+            go_timer += 1
+            if go_timer >= GO_LINGER:
+                _menu.save_score(score)
+                return
+
         if not game_over and scores.check_game_over(boxes.grid_obj, picked_boxes):
             game_over = True
 
-        # Tick down flash animation
         if flash_t > 0:
             flash_t -= 1
         else:
@@ -423,28 +469,30 @@ def run(title="Block Blast"):
         draw_grid(screen, tick,
                   dragging=dragging_box, drag_color=dragging_color,
                   flash_rows=flash_rows, flash_cols=flash_cols, flash_t=flash_t)
-        draw_panel(screen, score, best, fonts, tick)
+        draw_panel(screen, score, best, fonts, tick,
+                   ai_enabled=_menu.ai_enabled)
         draw_picker_panel(screen, fonts, picked_boxes, dragging_idx)
 
-        if dragging_box is not None:
+        if dragging_box is not None and not game_over:
             draw_dragged_piece(screen, dragging_box, dragging_color, mouse_pos)
 
         if game_over:
-            # Draw game over overlay
-            overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 120))
+            # Fade-out overlay + message
+            fade = min(1.0, go_timer / 30)
+            overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, int(160 * fade)))
             screen.blit(overlay, (0, 0))
-            go_font = pygame.font.SysFont("impact", 48)
-            go_text = go_font.render("GAME OVER", True, (255, 80, 120))
-            screen.blit(go_text, (screen.get_width() // 2 - go_text.get_width() // 2,
-                                 screen.get_height() // 2 - go_text.get_height() // 2))
+
+            if fade > 0.4:
+                cx = screen.get_width()  // 2
+                cy = screen.get_height() // 2
+                go_s = fonts['gameover'].render("GAME OVER", True, NEON_PINK)
+                screen.blit(go_s, (cx - go_s.get_width() // 2, cy - 60))
+                sc_s = fonts['title'].render(f"SCORE: {score:,}", True, SCORE_GOLD)
+                screen.blit(sc_s, (cx - sc_s.get_width() // 2, cy + 10))
+                hint = fonts['small'].render("returning to menu...", True, DARK_TEXT)
+                screen.blit(hint, (cx - hint.get_width() // 2, cy + 60))
 
         pygame.display.flip()
         clock.tick(60)
         tick += 1
-
-    pygame.quit()
-
-
-if __name__ == "__main__":
-    run()

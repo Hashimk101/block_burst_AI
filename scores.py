@@ -58,12 +58,14 @@ def process_move(grid):
 
 def check_game_over(grid, blocks):
     '''
-        Check if any of the given blocks can be placed on the grid. If not, game is over.
+    Check if any of the given blocks can be placed on the grid.
+    Skips None slots. If no block can be placed anywhere, game is over.
     '''
     for block in blocks:
+        if block is None:
+            continue
         for r in range(len(grid)):
             for c in range(len(grid[0])):
                 if boxes.is_valid_placement(block.block_type, r, c):
                     return False
     return True
-
