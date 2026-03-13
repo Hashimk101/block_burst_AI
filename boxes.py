@@ -1,8 +1,17 @@
-import random
 row_size = 8
 col_size = 8
 
-# 0 = empty, 1-5 = block types
+# ---------------------------------------------------------------------------
+# Grid philosophy:
+#   grid_obj is a plain 2D list of integers.
+#   0           = empty
+#   nonzero int = filled (value encodes the color index used at placement time)
+#
+#   Box instances are only used to look up shape offsets before placement.
+#   Once place_block() writes values into grid_obj, the Box is discarded —
+#   there is no back-reference from a grid cell to its original Box.
+#   This makes line-clearing trivial: just zero out the relevant cells.
+# ---------------------------------------------------------------------------
 grid_obj = [[0 for _ in range(col_size)] for _ in range(row_size)]
 
 # ---------------------------------------------------------------------------
@@ -131,6 +140,14 @@ class Box:
 
 
 def get_3_random_boxes():
-    """Return 3 random Box instances (fresh objects each call)."""
+    """Return 3 fresh random Box instances."""
+    import random
     keys = random.sample(list(SHAPES.keys()), 3)
     return [Box(k) for k in keys]
+
+
+def reset_grid():
+    """Zero out the entire grid (e.g. new game)."""
+    for r in range(row_size):
+        for c in range(col_size):
+            grid_obj[r][c] = 0
