@@ -69,3 +69,32 @@ def check_game_over(grid, blocks):
                 if boxes.is_valid_placement(block.block_type, r, c):
                     return False
     return True
+
+
+def getMaxSquares(i, j, grid):
+    if i < 0 or i >= len(grid) or j < 0 or j >= len(grid[0]) or grid[i][j] != 0:
+        return 0
+
+    grid[i][j] = -1  # Mark as visited
+    size = 1
+
+
+
+    size += getMaxSquares(i+1, j, grid)
+    size += getMaxSquares(i-1, j, grid)
+    size += getMaxSquares(i, j+1, grid)
+    size += getMaxSquares(i, j-1, grid)
+
+    return size
+
+
+
+def findMaxConnectedSquares(grid):
+    grid_copy = [row[:] for row in grid]
+    maxSquares: int = 0
+    for i in range(len(grid)):
+        for j in range(len(grid[0])):
+            if grid_copy[i][j] == 0:
+                size = getMaxSquares(i, j, grid_copy)
+                maxSquares = max(maxSquares, size)
+    return maxSquares

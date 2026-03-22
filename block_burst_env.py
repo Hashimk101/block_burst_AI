@@ -101,7 +101,6 @@ class BlockBurstEnv(gym.Env):
     def step(self, action):
         mask = self.get_action_mask()
         if not mask[action]:
-            # Should never happen when the agent respects the mask
             return self._get_obs(), -1.0, False, False, {}
 
         box_idx, r, c = self.decode_action(action)
@@ -112,8 +111,16 @@ class BlockBurstEnv(gym.Env):
 
         pts, _, _ = self._process_move()
 
-        # Survival bonus + score reward
-        reward = 0.1 + pts / 100.0
+        # How connected is the empty space after this placement?
+        connectivity = scores.findMaxConnectedSquares(self._grid)
+        max_possible = boxes.row_size * boxes.col_size
+        connectivity_reward = (connectivity / max_possible) * 0.5  # 0.0 → 0.5
+
+        # Line clear reward
+        clear_reward = pts / 100.0
+
+        # Combine
+        reward = 0.3 + clear_reward + connectivity_reward
 
         if all(b is None for b in self._boxes):
             self._boxes = boxes.get_3_random_boxes(self._grid)
