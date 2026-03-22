@@ -14,7 +14,7 @@ class BlockBurstEnv(gym.Env):
 
         self.observation_space = spaces.Dict(
             {
-                "obs": spaces.Box(low=0, high=3, shape=(row_size * col_size,), dtype=np.float32),
+                "obs": spaces.Box(low=0, high=1, shape=(row_size * col_size * 4,), dtype=np.float32),
                 "action_mask": spaces.Box(low=0, high=1, shape=(self.n_actions,), dtype=bool)
             }
         )
@@ -101,6 +101,7 @@ class BlockBurstEnv(gym.Env):
     def step(self, action):
         mask = self.get_action_mask()
         if not mask[action]:
+            # Should never happen when the agent respects the mask
             return self._get_obs(), -1.0, False, False, {}
 
         box_idx, r, c = self.decode_action(action)
@@ -111,16 +112,12 @@ class BlockBurstEnv(gym.Env):
 
         pts, _, _ = self._process_move()
 
-        # How connected is the empty space after this placement?
+        # connectivity reward — keep board open
         connectivity = scores.findMaxConnectedSquares(self._grid)
         max_possible = boxes.row_size * boxes.col_size
-        connectivity_reward = (connectivity / max_possible) * 0.5  # 0.0 → 0.5
+        connectivity_reward = (connectivity / max_possible) * 0.5
 
-        # Line clear reward
-        clear_reward = pts / 100.0
-
-        # Combine
-        reward = 0.3 + clear_reward + connectivity_reward
+        reward = 0.3 + pts / 100.0 + connectivity_reward
 
         if all(b is None for b in self._boxes):
             self._boxes = boxes.get_3_random_boxes(self._grid)
@@ -132,10 +129,23 @@ class BlockBurstEnv(gym.Env):
         return self._get_obs(), reward, terminated, False, {}
 
     def _get_obs(self):
+        # Board state — 1.0 filled, 0.0 empty
         flat = np.array(
             [1.0 if self._grid[r][c] != 0 else 0.0
              for r in range(boxes.row_size)
              for c in range(boxes.col_size)],
             dtype=np.float32,
         )
-        return {"obs": flat, "action_mask": self.get_action_mask()}
+
+        # Piece encodings — each slot gets a full board-sized footprint
+        # showing where that piece's cells are (relative to top-left anchor)
+        piece_obs = np.zeros(3 * boxes.row_size * boxes.col_size, dtype=np.float32)
+        for box_idx, box in enumerate(self._boxes):
+            if box is None:
+                continue
+            for dr, dc in box.offsets:
+                cell = dr * boxes.col_size + dc
+                piece_obs[box_idx * boxes.row_size * boxes.col_size + cell] = 1.0
+
+        obs = np.concatenate([flat, piece_obs])
+        return {"obs": obs, "action_mask": self.get_action_mask()}
