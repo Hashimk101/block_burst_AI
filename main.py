@@ -12,7 +12,7 @@ def main():
     )
     sh = gui.TOP_BAR_HEIGHT + boxes.row_size * gui.cell_size + gui.RIGHT_MARGIN
 
-    screen = pygame.display.set_mode((sw, sh))
+    screen = pygame.display.set_mode((sw, sh + 30))
     pygame.display.set_caption("Block Blast")
 
     fonts  = menu.make_fonts()

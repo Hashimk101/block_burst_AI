@@ -1,3 +1,4 @@
+import random
 row_size = 8
 col_size = 8
 
@@ -78,6 +79,9 @@ SHAPES = {
 }
 
 
+SHAPE_SIZE = {k: (max(r for r,c in offsets)+1, max(c for r,c in offsets)+1)
+              for k, offsets in SHAPES.items()}
+
 def get_anchor(block_type):
     """Return the anchor offset (always top-left, i.e. (0,0))."""
     return (0, 0)
@@ -139,10 +143,19 @@ class Box:
 
 
 
-def get_3_random_boxes():
+def get_number_of_free_cells(grid):
+    """Return the number of empty (zero) cells in the given grid."""
+    return sum(1 for r in range(row_size) for c in range(col_size)
+               if grid[r][c] == 0)
+
+def get_3_random_boxes(grid):
     """Return 3 fresh random Box instances."""
-    import random
-    keys = random.sample(list(SHAPES.keys()), 3)
+    shapes_available = []
+    free_cells = get_number_of_free_cells(grid)
+    for block_type, (h, w) in SHAPE_SIZE.items():
+        if h <= free_cells and w <= free_cells:
+            shapes_available.append(block_type)
+    keys = random.sample(shapes_available, 3)
     return [Box(k) for k in keys]
 
 

@@ -2,6 +2,7 @@ import pygame
 import math
 import boxes
 import scores
+import menu as _menu
 
 
 # ── Cell size ────────────────────────────────────────────────────────────────
@@ -365,13 +366,12 @@ def run(screen, fonts, clock):
     Returns when the player goes to menu (HOME button, game over, or ESC).
     Score is saved before returning.
     """
-    import menu as _menu
 
     boxes.reset_grid()
 
     score        = 0
     best         = max(_menu.load_highscores()[:1] or [0])
-    picked_boxes = boxes.get_3_random_boxes()
+    picked_boxes = boxes.get_3_random_boxes(boxes.grid_obj)
 
     dragging_idx   = None
     dragging_box   = None
@@ -384,6 +384,11 @@ def run(screen, fonts, clock):
     game_over        = False
     go_timer         = 0       # frames to show game-over overlay before returning
     GO_LINGER        = 120     # 2 seconds at 60fps
+
+    # AI state
+    AI_STEP_DELAY = int(30 * 1.2)  # frames between AI moves (~0.5s at 60fps), slowed by 20%
+    ai_timer      = 0          # counts up; fires when >= AI_STEP_DELAY
+    ai_pending    = None       # (box_idx, anchor_r, anchor_c) queued move
 
     tick = 0
 
@@ -417,7 +422,7 @@ def run(screen, fonts, clock):
                     if placed:
                         picked_boxes[dragging_idx] = None
                         if all(b is None for b in picked_boxes):
-                            picked_boxes = boxes.get_3_random_boxes()
+                            picked_boxes = boxes.get_3_random_boxes(boxes.grid_obj)
 
                         pts, cleared_rows, cleared_cols = scores.process_move(boxes.grid_obj)
                         if pts > 0:
@@ -462,6 +467,39 @@ def run(screen, fonts, clock):
         else:
             flash_rows = []
             flash_cols = []
+
+        # ── AI step ──────────────────────────────────────────────────────────
+        if _menu.ai_enabled and not game_over and dragging_box is None:
+            ai_timer += 1
+            if ai_timer >= AI_STEP_DELAY:
+                ai_timer = 0
+                try:
+                    from ai_for_game import get_ai_action
+                    result = get_ai_action(boxes.grid_obj, picked_boxes)
+                    if result is not None:
+                        box_idx, anchor_r, anchor_c = result
+                        box = picked_boxes[box_idx]
+                        if box is not None:
+                            placed = boxes.place_block(
+                                box.block_type, anchor_r, anchor_c,
+                                value=box_idx + 1
+                            )
+                            if placed:
+                                picked_boxes[box_idx] = None
+                                if all(b is None for b in picked_boxes):
+                                    picked_boxes = boxes.get_3_random_boxes(boxes.grid_obj)
+                                pts, cleared_rows, cleared_cols = scores.process_move(boxes.grid_obj)
+                                if pts > 0:
+                                    score += pts
+                                    best   = max(best, score)
+                                    flash_rows = cleared_rows
+                                    flash_cols = cleared_cols
+                                    flash_t    = FLASH_DURATION
+                                if scores.check_game_over(boxes.grid_obj, picked_boxes):
+                                    game_over = True
+                except Exception as e:
+                    # Model not trained yet — silently skip
+                    pass
 
         # ── Draw ──
         draw_background(screen)
