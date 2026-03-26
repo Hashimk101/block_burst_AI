@@ -2,7 +2,6 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import boxes
-import scores
 from boxes import grid_obj, row_size, col_size, get_3_random_boxes, reset_grid
 
 
@@ -98,29 +97,82 @@ class BlockBurstEnv(gym.Env):
         pts   = base.get(total, 800 + (total - 4) * 200) if total else 0
         return pts, full_rows, full_cols
 
+    def _count_valid_placements(self):
+        """Count total valid placements across all current pieces.
+        More valid placements = more flexible board = better position."""
+        count = 0
+        for box in self._boxes:
+            if box is None:
+                continue
+            for r in range(boxes.row_size):
+                for c in range(boxes.col_size):
+                    if self._is_valid(box.block_type, r, c):
+                        count += 1
+        return count
+
+    def _count_row_progress(self):
+        """Sum of squared row fill ratios — rewards nearly-full rows more."""
+        total = 0.0
+        for r in range(boxes.row_size):
+            filled = sum(1 for c in range(boxes.col_size) if self._grid[r][c] != 0)
+            total += (filled / boxes.col_size) ** 2
+        return total
+
+    def _count_col_progress(self):
+        """Sum of squared col fill ratios — rewards nearly-full cols more."""
+        total = 0.0
+        for c in range(boxes.col_size):
+            filled = sum(1 for r in range(boxes.row_size) if self._grid[r][c] != 0)
+            total += (filled / boxes.row_size) ** 2
+        return total
+
     def step(self, action):
         mask = self.get_action_mask()
         if not mask[action]:
-            # Should never happen when the agent respects the mask
             return self._get_obs(), -1.0, False, False, {}
 
         box_idx, r, c = self.decode_action(action)
         box = self._boxes[box_idx]
+
+        # Measure flexibility BEFORE placement
+        placements_before = self._count_valid_placements()
+        progress_before   = self._count_row_progress() + self._count_col_progress()
 
         self._place(box.block_type, r, c, value=box_idx + 1)
         self._boxes[box_idx] = None
 
         pts, _, _ = self._process_move()
 
-        # connectivity reward — keep board open
-        connectivity = scores.findMaxConnectedSquares(self._grid)
-        max_possible = boxes.row_size * boxes.col_size
-        connectivity_reward = (connectivity / max_possible) * 0.5
-
-        reward = 0.3 + pts / 100.0 + connectivity_reward
-
         if all(b is None for b in self._boxes):
             self._boxes = boxes.get_3_random_boxes(self._grid)
+
+        # Measure flexibility AFTER placement + refill
+        placements_after = self._count_valid_placements()
+        progress_after   = self._count_row_progress() + self._count_col_progress()
+
+        # Max possible valid placements (all 3 pieces fit everywhere)
+        max_placements = 3 * boxes.row_size * boxes.col_size
+
+        # 1. Flexibility reward — how many future options do we have?
+        #    Normalised 0-1. This is the core signal.
+        flexibility = placements_after / max_placements
+
+        # 2. Penalise losing flexibility — did this move close off options?
+        flexibility_delta = (placements_after - placements_before) / max_placements
+
+        # 3. Progress reward — reward moving toward full rows/cols (squared)
+        progress_delta = progress_after - progress_before
+
+        # 4. Line clear reward
+        clear_reward = pts / 100.0
+
+        reward = (
+            0.1                           # survival bonus
+            + clear_reward                # clearing lines
+            + flexibility * 0.4           # absolute flexibility of current state
+            + flexibility_delta * 0.3     # penalise moves that close off options
+            + progress_delta * 0.1        # reward building toward clears
+        )
 
         terminated = self._check_game_over()
         if terminated:

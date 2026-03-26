@@ -387,8 +387,9 @@ def run(screen, fonts, clock):
 
     # AI state
     AI_STEP_DELAY = int(30 * 1.2)  # frames between AI moves (~0.5s at 60fps), slowed by 20%
-    ai_timer      = 0          # counts up; fires when >= AI_STEP_DELAY
-    ai_pending    = None       # (box_idx, anchor_r, anchor_c) queued move
+    ai_timer      = 0
+    ai_pending    = None
+    _get_ai_action = None   # cached reference — loaded once when AI first turns on
 
     tick = 0
 
@@ -470,36 +471,45 @@ def run(screen, fonts, clock):
 
         # ── AI step ──────────────────────────────────────────────────────────
         if _menu.ai_enabled and not game_over and dragging_box is None:
-            ai_timer += 1
-            if ai_timer >= AI_STEP_DELAY:
-                ai_timer = 0
+            # Load model once the first time AI is turned on
+            if _get_ai_action is None:
                 try:
-                    from ai_for_game import get_ai_action
-                    result = get_ai_action(boxes.grid_obj, picked_boxes)
-                    if result is not None:
-                        box_idx, anchor_r, anchor_c = result
-                        box = picked_boxes[box_idx]
-                        if box is not None:
-                            placed = boxes.place_block(
-                                box.block_type, anchor_r, anchor_c,
-                                value=box_idx + 1
-                            )
-                            if placed:
-                                picked_boxes[box_idx] = None
-                                if all(b is None for b in picked_boxes):
-                                    picked_boxes = boxes.get_3_random_boxes(boxes.grid_obj)
-                                pts, cleared_rows, cleared_cols = scores.process_move(boxes.grid_obj)
-                                if pts > 0:
-                                    score += pts
-                                    best   = max(best, score)
-                                    flash_rows = cleared_rows
-                                    flash_cols = cleared_cols
-                                    flash_t    = FLASH_DURATION
-                                if scores.check_game_over(boxes.grid_obj, picked_boxes):
-                                    game_over = True
+                    from ai_for_game import get_ai_action as _fn, load_model
+                    load_model()           # preload weights now, not during gameplay
+                    _get_ai_action = _fn
                 except Exception as e:
-                    # Model not trained yet — silently skip
-                    pass
+                    print(f"AI load failed: {e}")
+                    _menu.ai_enabled = False  # turn off AI if model missing
+
+            if _get_ai_action is not None:
+                ai_timer += 1
+                if ai_timer >= AI_STEP_DELAY:
+                    ai_timer = 0
+                    try:
+                        result = _get_ai_action(boxes.grid_obj, picked_boxes)
+                        if result is not None:
+                            box_idx, anchor_r, anchor_c = result
+                            box = picked_boxes[box_idx]
+                            if box is not None:
+                                placed = boxes.place_block(
+                                    box.block_type, anchor_r, anchor_c,
+                                    value=box_idx + 1
+                                )
+                                if placed:
+                                    picked_boxes[box_idx] = None
+                                    if all(b is None for b in picked_boxes):
+                                        picked_boxes = boxes.get_3_random_boxes(boxes.grid_obj)
+                                    pts, cleared_rows, cleared_cols = scores.process_move(boxes.grid_obj)
+                                    if pts > 0:
+                                        score += pts
+                                        best   = max(best, score)
+                                        flash_rows = cleared_rows
+                                        flash_cols = cleared_cols
+                                        flash_t    = FLASH_DURATION
+                                    if scores.check_game_over(boxes.grid_obj, picked_boxes):
+                                        game_over = True
+                    except Exception as e:
+                        print(f"AI step error: {e}")
 
         # ── Draw ──
         draw_background(screen)
