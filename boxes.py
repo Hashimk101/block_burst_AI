@@ -148,14 +148,100 @@ def get_number_of_free_cells(grid):
     return sum(1 for r in range(row_size) for c in range(col_size)
                if grid[r][c] == 0)
 
+
+def _is_placeable_on_grid(block_type, grid):
+    """True if block_type has at least one valid placement on the given grid."""
+    for r in range(row_size):
+        for c in range(col_size):
+            ok = True
+            for dr, dc in SHAPES[block_type]:
+                rr, cc = r + dr, c + dc
+                if rr < 0 or rr >= row_size or cc < 0 or cc >= col_size:
+                    ok = False
+                    break
+                if grid[rr][cc] != 0:
+                    ok = False
+                    break
+            if ok:
+                return True
+    return False
+
+
+def _simulate_place(block_type, anchor_r, anchor_c, grid):
+    """Return a new grid with block placed and lines cleared. None if invalid."""
+    for dr, dc in SHAPES[block_type]:
+        r, c = anchor_r + dr, anchor_c + dc
+        if r < 0 or r >= row_size or c < 0 or c >= col_size:
+            return None
+        if grid[r][c] != 0:
+            return None
+    # Deep copy and place
+    new_grid = [row[:] for row in grid]
+    for dr, dc in SHAPES[block_type]:
+        new_grid[anchor_r + dr][anchor_c + dc] = 1
+    # Clear full rows
+    for r in range(row_size):
+        if all(new_grid[r][c] != 0 for c in range(col_size)):
+            for c in range(col_size):
+                new_grid[r][c] = 0
+    # Clear full cols
+    for c in range(col_size):
+        if all(new_grid[r][c] != 0 for r in range(row_size)):
+            for r in range(row_size):
+                new_grid[r][c] = 0
+    return new_grid
+
+
+def _placeable_after_clear(block_type, grid):
+    """
+    Depth-2 lookahead: is block_type placeable on grid directly,
+    OR placeable after any single other piece clears a line first?
+    """
+    # Depth 1 — direct placement
+    if _is_placeable_on_grid(block_type, grid):
+        return True
+
+    # Depth 2 — try placing every other shape at every position,
+    # then check if block_type becomes placeable after the resulting clears
+    for other_type in SHAPES:
+        for r in range(row_size):
+            for c in range(col_size):
+                new_grid = _simulate_place(other_type, r, c, grid)
+                if new_grid is None:
+                    continue
+                if _is_placeable_on_grid(block_type, new_grid):
+                    return True
+    return False
+
+
 def get_3_random_boxes(grid):
-    """Return 3 fresh random Box instances."""
-    shapes_available = []
-    free_cells = get_number_of_free_cells(grid)
-    for block_type, (h, w) in SHAPE_SIZE.items():
-        if h <= free_cells and w <= free_cells:
-            shapes_available.append(block_type)
-    keys = random.sample(shapes_available, 3)
+    """
+    Return 3 fresh random Box instances that are all guaranteed to be
+    placeable on the current grid — either directly or after a line clear
+    (depth-2 lookahead). Falls back to direct-only if lookahead finds nothing.
+    """
+    # Pass 1 — shapes placeable RIGHT NOW
+    direct = [bt for bt in SHAPES if _is_placeable_on_grid(bt, grid)]
+
+    if len(direct) >= 3:
+        keys = random.sample(direct, 3)
+        return [Box(k) for k in keys]
+
+    # Pass 2 — shapes placeable after a line clear (depth-2 lookahead)
+    lookahead = [bt for bt in SHAPES if _placeable_after_clear(bt, grid)]
+
+    if len(lookahead) >= 3:
+        keys = random.sample(lookahead, 3)
+        return [Box(k) for k in keys]
+
+    # Fallback — board is nearly full, return whatever fits at all
+    fallback = direct if direct else lookahead
+    if len(fallback) == 0:
+        # Truly no moves possible — return smallest shapes
+        fallback = ["O", "I_H", "I_V"]
+    while len(fallback) < 3:
+        fallback = fallback + fallback
+    keys = random.sample(fallback, 3)
     return [Box(k) for k in keys]
 
 
